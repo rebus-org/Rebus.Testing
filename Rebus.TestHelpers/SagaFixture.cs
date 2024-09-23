@@ -57,8 +57,15 @@ public static class SagaFixture
 
         var activator = new BuiltinHandlerActivator();
         activator.Register(sagaHandlerFactory);
-        sagaSerializerFactory ??= () => new NewtonSoftSagaSerializer();
-        return For<TSagaHandler>(() => Configure.With(activator), maxDeliveryAttempts: maxDeliveryAttempts, secondLevelRetriesEnabled: secondLevelRetriesEnabled, sagaSerializerFactory);
+
+        RebusConfigurer DefaultRebusConfigurerFactory() => Configure.With(activator);
+
+        return For<TSagaHandler>(
+            configurerFactory: DefaultRebusConfigurerFactory,
+            maxDeliveryAttempts: maxDeliveryAttempts,
+            secondLevelRetriesEnabled: secondLevelRetriesEnabled,
+            sagaSerializerFactory: sagaSerializerFactory ?? DefaultSagaSerializerFactory
+        );
     }
 
     /// <summary>
@@ -71,9 +78,16 @@ public static class SagaFixture
             Console.WriteLine("Remember that the saga fixture collects all internal logs which you can access with fixture.LogEvents");
             _loggingInfoHasBeenShown = true;
         }
-        sagaSerializerFactory ??= () => new NewtonSoftSagaSerializer();
-        return new SagaFixture<TSagaHandler>(configurerFactory, maxDeliveryAttempts, secondLevelRetriesEnabled, sagaSerializerFactory);
+
+        return new SagaFixture<TSagaHandler>(
+            configurerFactory: configurerFactory,
+            maxDeliveryAttempts: maxDeliveryAttempts,
+            secondLevelRetriesEnabled: secondLevelRetriesEnabled,
+            sagaSerializerFactory: sagaSerializerFactory ?? DefaultSagaSerializerFactory
+        );
     }
+
+    static ISagaSerializer DefaultSagaSerializerFactory() => new NewtonSoftSagaSerializer();
 }
 
 /// <summary>
@@ -147,7 +161,9 @@ public class SagaFixture<TSagaHandler> : IDisposable where TSagaHandler : Saga
 
         _loggerFactory = new TestLoggerFactory(new FakeRebusTime());
 
-        _bus = configurerFactory()
+        var rebusConfigurer = configurerFactory();
+
+        _bus = rebusConfigurer
             .Logging(l => l.Use(_loggerFactory))
             .Transport(t => t.UseInMemoryTransport(network, SagaInputQueueName))
             .Sagas(s => s.Register(_ => _inMemorySagaStorage))

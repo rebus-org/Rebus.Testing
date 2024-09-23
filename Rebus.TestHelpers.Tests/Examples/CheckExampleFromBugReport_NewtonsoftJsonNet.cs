@@ -1,15 +1,19 @@
 ﻿using System;
 using System.Linq;
-using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using NUnit.Framework;
+using Rebus.Activation;
+using Rebus.Config;
 using Rebus.Handlers;
 using Rebus.Sagas;
+using Rebus.Serialization.Json;
 
-namespace Rebus.TestHelpers.Tests.Bugs;
+namespace Rebus.TestHelpers.Tests.Examples;
 
 [TestFixture]
-public class CheckExampleFromBugReport
+[Description("Demonstrates how [JsonConstructor] attribute can be made to work with a customized message serializer")]
+public class CheckExampleFromBugReport_NewtonsoftJsonNet
 {
     [Test]
     public void When_TriggeringMySaga_Then_ASagaIsStartedWithCorrectData()
@@ -19,8 +23,14 @@ public class CheckExampleFromBugReport
         var message = new TriggerMySagaMessage(correlationId);
 
         // act
-        using var fixture = SagaFixture.For<MySaga>();
+        using var activator = new BuiltinHandlerActivator();
+        activator.Register(() => new MySaga());
+
+        using var fixture = SagaFixture.For<MySaga>(() => Configure.With(activator).Serialization(s => s.UseNewtonsoftJson()));
+
         fixture.Deliver(message);
+
+        Console.WriteLine(string.Join(Environment.NewLine, fixture.LogEvents));
 
         var data = fixture.Data.OfType<MySagaData>().First();
 
