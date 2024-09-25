@@ -56,6 +56,9 @@
 ## 9.1.0
 * Add `FakeMessageContextScope` to make it easier to fake a message context so that `MessageContext.Current` will return something
 
+## 9.2.0
+* Add ability to configure a global customizer on `SagaFixture` by calling `SetGlobalCustomizer`. The customizer is a normal `RebusConfigurer` callback, which makes it easy to call own extension methods, set the message serializer, etc.
+
 [fishie]: https://github.com/fishie
 [hdrachmann]: https://github.com/hdrachmann
 [mclausen]: https://github.com/mclausen

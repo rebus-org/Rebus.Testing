@@ -27,6 +27,21 @@ public static class SagaFixture
     internal static bool _loggingInfoHasBeenShown;
 
     /// <summary>
+    /// Sets the global customizer, which will be called each time a <see cref="SagaFixture{TSagaHandler}"/> is created. This is a good way to configure a global default (e.g.
+    /// by configuring the message serializer), which will then be used in all subsequent calls to the <see cref="SagaFixture{TSagaHandler}"/> factory methods.
+    /// Can be cleared again by calling <see cref="ClearGlobalCustomizer"/>.
+    /// </summary>
+    public static void SetGlobalCustomizer(Func<RebusConfigurer, RebusConfigurer> configure)
+    {
+        GlobalCustomizer = configure ?? throw new ArgumentException(
+            $"Please provide a customer callback when calling this method. If you want to clear the customizer, please call {nameof(ClearGlobalCustomizer)}() instead.");
+    }
+
+    public static void ClearGlobalCustomizer() => GlobalCustomizer = null;
+
+    public static Func<RebusConfigurer, RebusConfigurer> GlobalCustomizer { get; private set; }
+
+    /// <summary>
     /// Creates a saga fixture for the specified saga handler, which must have a default constructor. If the saga handler
     /// requires any parameters to be created, use the <see cref="For{TSagaHandler}(Func{TSagaHandler}, int, bool, Func{ISagaSerializer})"/> overload that
     /// accepts a factory function as a saga handler instance creator
@@ -56,9 +71,33 @@ public static class SagaFixture
         if (sagaHandlerFactory == null) throw new ArgumentNullException(nameof(sagaHandlerFactory));
 
         var activator = new BuiltinHandlerActivator();
+
         activator.Register(sagaHandlerFactory);
 
-        RebusConfigurer DefaultRebusConfigurerFactory() => Configure.With(activator);
+        return CreateSagaFixture<TSagaHandler>(maxDeliveryAttempts, secondLevelRetriesEnabled, sagaSerializerFactory, activator);
+    }
+
+    /// <summary>
+    /// Creates a saga fixture for the specified saga handler, which will be instantiated by the given factory method
+    /// </summary>
+    public static SagaFixture<TSagaHandler> For<TSagaHandler>(Func<IBus, TSagaHandler> sagaHandlerFactory, int maxDeliveryAttempts = 5, bool secondLevelRetriesEnabled = false, Func<ISagaSerializer> sagaSerializerFactory = null) where TSagaHandler : Saga, IHandleMessages
+    {
+        if (sagaHandlerFactory == null) throw new ArgumentNullException(nameof(sagaHandlerFactory));
+
+        var activator = new BuiltinHandlerActivator();
+
+        activator.Register((bus, _) => sagaHandlerFactory(bus));
+
+        return CreateSagaFixture<TSagaHandler>(maxDeliveryAttempts, secondLevelRetriesEnabled, sagaSerializerFactory, activator);
+    }
+
+    static SagaFixture<TSagaHandler> CreateSagaFixture<TSagaHandler>(int maxDeliveryAttempts, bool secondLevelRetriesEnabled,
+        Func<ISagaSerializer> sagaSerializerFactory, BuiltinHandlerActivator activator) where TSagaHandler : Saga, IHandleMessages
+    {
+        RebusConfigurer DefaultRebusConfigurerFactory()
+        {
+            return Configure.With(activator);
+        }
 
         return For<TSagaHandler>(
             configurerFactory: DefaultRebusConfigurerFactory,
@@ -163,7 +202,7 @@ public class SagaFixture<TSagaHandler> : IDisposable where TSagaHandler : Saga
 
         var rebusConfigurer = configurerFactory();
 
-        _bus = rebusConfigurer
+        rebusConfigurer = rebusConfigurer
             .Logging(l => l.Use(_loggerFactory))
             .Transport(t => t.UseInMemoryTransport(network, SagaInputQueueName))
             .Sagas(s => s.Register(_ => _inMemorySagaStorage))
@@ -202,8 +241,16 @@ public class SagaFixture<TSagaHandler> : IDisposable where TSagaHandler : Saga
                     return new PipelineStepInjector(pipeline)
                         .OnReceive(_secondLevelDispatcher, PipelineRelativePosition.Before, typeof(DefaultRetryStep));
                 });
-            })
-            .Start();
+            });
+
+        var customizer = SagaFixture.GlobalCustomizer;
+
+        if (customizer != null)
+        {
+            rebusConfigurer = customizer(rebusConfigurer);
+        }
+
+        _bus = rebusConfigurer.Start();
     }
 
     /// <summary>
